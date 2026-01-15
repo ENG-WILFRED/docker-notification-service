@@ -1,5 +1,5 @@
 import { Kafka, Consumer, EachMessagePayload } from 'kafkajs';
-import logger from './logger';
+import logger from '../logger';
 
 export interface NotificationMessage {
   id: string;

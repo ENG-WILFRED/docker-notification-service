@@ -1,5 +1,5 @@
 import { Kafka, logLevel } from 'kafkajs';
-import logger from './logger';
+import logger from '../logger';
 
 export class KafkaConnection {
   private kafka: Kafka;

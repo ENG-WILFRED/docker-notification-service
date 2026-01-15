@@ -1,8 +1,8 @@
 import dotenv from 'dotenv';
 import logger from './logger';
-import KafkaConnection from './kafka';
-import NotificationProducer from './producer';
-import NotificationConsumer, { NotificationMessage } from './consumer';
+import KafkaConnection from './kafka/kafka';
+import NotificationProducer from './kafka/producer';
+import NotificationConsumer, { NotificationMessage } from './kafka/consumer';
 import NotificationAPI from './api';
 
 dotenv.config();

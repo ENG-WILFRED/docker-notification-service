@@ -1,5 +1,5 @@
 import { Kafka, Producer } from 'kafkajs';
-import logger from './logger';
+import logger from '../logger';
 
 export class NotificationProducer {
   private producer: Producer;
