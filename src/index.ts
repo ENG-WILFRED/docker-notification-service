@@ -1,85 +1,38 @@
 import dotenv from 'dotenv';
 import logger from './logger';
-import KafkaConnection from './kafka/kafka';
-import NotificationProducer from './kafka/producer';
-import NotificationConsumer, { NotificationMessage } from './kafka/consumer';
 import NotificationAPI from './api';
+import { dbPool } from './db';
+import { redisClient } from './cache';
+import { RetryHandler } from './cache/retry';
+import { captureServiceConfig, writeConfigToIntegration, logConfigToConsole } from './config-logger';
 
 dotenv.config();
 
-const KAFKA_BROKER = process.env.KAFKA_BROKER || 'localhost:9092';
 const SERVICE_PORT = parseInt(process.env.SERVICE_PORT || '3000', 10);
 
 async function main() {
   try {
-    logger.info('Starting Kafka Notification Service', {
+    // Capture and log configuration
+    const config = captureServiceConfig();
+    logConfigToConsole(config);
+    writeConfigToIntegration(config);
+
+    logger.info('Starting Notification Service', {
       source: 'MAIN',
       timestamp: new Date().toISOString(),
     });
 
-    // Initialize Kafka connection
-    const kafkaConnection = new KafkaConnection([KAFKA_BROKER]);
-    await kafkaConnection.connect();
+    // Initialize database connection
+    await dbPool.connect();
 
-    // Initialize producer
-    const producer = new NotificationProducer(kafkaConnection.getKafkaInstance());
-    await producer.connect();
+    // Initialize Redis connection
+    await redisClient.connect();
 
-    // Initialize consumer
-    const consumer = new NotificationConsumer(
-      kafkaConnection.getKafkaInstance(),
-      'notifications',
-      'notification-service-group'
-    );
-    await consumer.connect();
-
-    // Register handlers for different notification types
-    consumer.registerHandler('email', async (notification: NotificationMessage) => {
-      logger.info(`Handling email notification:`, {
-        source: 'CONSUMER',
-        userId: notification.userId,
-        title: notification.title,
-        timestamp: new Date().toISOString(),
-      });
-      // TODO: Implement email sending logic
-    });
-
-    consumer.registerHandler('sms', async (notification: NotificationMessage) => {
-      logger.info(`Handling SMS notification:`, {
-        source: 'CONSUMER',
-        userId: notification.userId,
-        message: notification.message,
-        timestamp: new Date().toISOString(),
-      });
-      // TODO: Implement SMS sending logic
-    });
-
-    consumer.registerHandler('push', async (notification: NotificationMessage) => {
-      logger.info(`Handling push notification:`, {
-        source: 'CONSUMER',
-        userId: notification.userId,
-        title: notification.title,
-        timestamp: new Date().toISOString(),
-      });
-      // TODO: Implement push notification logic
-    });
-
-    // Default handler for all notifications
-    consumer.registerHandler('*', async (notification: NotificationMessage) => {
-      logger.info(`Processing notification:`, {
-        source: 'CONSUMER',
-        id: notification.id,
-        type: notification.type,
-        userId: notification.userId,
-        timestamp: new Date().toISOString(),
-      });
-    });
-
-    consumer.subscribe();
-    await consumer.start();
+    // Start retry processor
+    RetryHandler.startRetryProcessor();
 
     // Start API server
-    const api = new NotificationAPI(producer, SERVICE_PORT);
+    const api = new NotificationAPI(SERVICE_PORT);
     api.start();
 
     // Handle graceful shutdown
@@ -88,8 +41,9 @@ async function main() {
         source: 'MAIN',
         timestamp: new Date().toISOString(),
       });
-      await consumer.disconnect();
-      await producer.disconnect();
+      RetryHandler.stopRetryProcessor();
+      await redisClient.disconnect();
+      await dbPool.disconnect();
       process.exit(0);
     });
 
@@ -98,8 +52,9 @@ async function main() {
         source: 'MAIN',
         timestamp: new Date().toISOString(),
       });
-      await consumer.disconnect();
-      await producer.disconnect();
+      RetryHandler.stopRetryProcessor();
+      await redisClient.disconnect();
+      await dbPool.disconnect();
       process.exit(0);
     });
 

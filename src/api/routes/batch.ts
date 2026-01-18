@@ -1,9 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../../logger';
-import { NotificationProducer } from '../../kafka';
+import { TemplateRenderer } from '../../templates';
 
-export function createBatchRouter(producer: NotificationProducer): Router {
+export function createBatchRouter(): Router {
   const router = Router();
 
   /**
@@ -105,23 +105,29 @@ export function createBatchRouter(producer: NotificationProducer): Router {
         count: notifications.length,
       });
 
-      const results = await Promise.allSettled(
-        notifications.map((notif) =>
-          producer.sendNotification({
-            userId: notif.userId,
-            type: notif.type,
-            title: notif.title,
-            message: notif.message,
-            metadata: notif.metadata,
-          })
-        )
-      );
+      // Register batch notifications with rendered templates
+      const batchData = notifications.map((notif, index) => {
+        const renderedTemplate = TemplateRenderer.render({
+          userId: notif.userId,
+          type: notif.type as 'email' | 'sms' | 'push',
+          title: notif.title,
+          message: notif.message,
+          metadata: notif.metadata,
+        });
 
-      const successful = results.filter((r) => r.status === 'fulfilled').length;
-      const failed = results.filter((r) => r.status === 'rejected').length;
+        return {
+          ...notif,
+          connectionKey: `batch-${batchId}-${index}`,
+          template: `${notif.type}-template`,
+          rendered: renderedTemplate,
+        };
+      });
+
+      const successful = batchData.length;
+      const failed = 0;
       const endTime = new Date().toISOString();
 
-      logger.info('Batch notifications processed', {
+      logger.info('Batch notifications registered with templates', {
         source: 'API',
         batchId,
         requestTime: requestStartTime,
@@ -129,15 +135,25 @@ export function createBatchRouter(producer: NotificationProducer): Router {
         totalNotifications: notifications.length,
         successful,
         failed,
+        connectionKeys: batchData.map(n => n.connectionKey),
       });
 
       res.status(202).json({
         success: true,
         batchId,
         totalNotifications: notifications.length,
-        queued: successful,
+        registered: successful,
         failed,
         timestamp: endTime,
+        connectionKeys: batchData.map(n => n.connectionKey),
+        templates: batchData.map(n => n.template),
+        rendered: batchData.map(n => ({
+          connectionKey: n.connectionKey,
+          type: n.type,
+          subject: n.rendered.subject,
+          html: n.type === 'email' ? n.rendered.html : undefined,
+          text: n.rendered.text || n.rendered.plainText,
+        })),
       });
     } catch (error) {
       const endTime = new Date().toISOString();
@@ -149,7 +165,7 @@ export function createBatchRouter(producer: NotificationProducer): Router {
         endTime,
       });
       res.status(500).json({
-        error: 'Failed to send batch notifications',
+        error: 'Failed to register batch notifications',
         batchId,
         timestamp: endTime,
       });

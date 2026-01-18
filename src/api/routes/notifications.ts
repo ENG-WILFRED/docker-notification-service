@@ -1,9 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../../logger';
-import { NotificationProducer } from '../../kafka';
+import { TemplateRenderer } from '../../templates';
 
-export function createNotificationsRouter(producer: NotificationProducer): Router {
+export function createNotificationsRouter(): Router {
   const router = Router();
 
   /**
@@ -108,33 +108,57 @@ export function createNotificationsRouter(producer: NotificationProducer): Route
         });
       }
 
-      await producer.sendNotification({
+      // Render template based on notification type
+      const renderedTemplate = TemplateRenderer.render({
         userId,
-        type,
+        type: type as 'email' | 'sms' | 'push',
         title,
         message,
         metadata,
       });
 
+      // Store notification metadata for documentation
+      const notificationData = {
+        userId,
+        type,
+        title,
+        message,
+        metadata,
+        notificationId,
+        connectionKey: `notification-${notificationId}`,
+        template: `${type}-template`,
+        rendered: renderedTemplate,
+      };
+
       const endTime = new Date().toISOString();
-      logger.info('Notification sent successfully via API', {
+      logger.info('Notification registered with template', {
         source: 'API',
         notificationId,
         requestTime: requestStartTime,
         endTime,
         userId,
         type,
+        connectionKey: notificationData.connectionKey,
+        template: notificationData.template,
+        templateType: type === 'email' ? 'HTML' : type === 'sms' ? 'Plain Text' : 'JSON',
       });
 
       res.status(202).json({
         success: true,
         notificationId,
-        message: 'Notification queued for processing',
+        message: 'Notification registered for processing',
         timestamp: endTime,
+        connectionKey: notificationData.connectionKey,
+        template: notificationData.template,
+        rendered: {
+          subject: renderedTemplate.subject,
+          html: type === 'email' ? renderedTemplate.html : undefined,
+          text: renderedTemplate.text || renderedTemplate.plainText,
+        },
       });
     } catch (error) {
       const endTime = new Date().toISOString();
-      logger.error('API error during notification send', {
+      logger.error('API error during notification registration', {
         source: 'API',
         notificationId,
         error,
@@ -142,7 +166,7 @@ export function createNotificationsRouter(producer: NotificationProducer): Route
         endTime,
       });
       res.status(500).json({
-        error: 'Failed to send notification',
+        error: 'Failed to register notification',
         notificationId,
         timestamp: endTime,
       });

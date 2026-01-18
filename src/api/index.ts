@@ -1,7 +1,6 @@
 import express, { Express } from 'express';
 import swaggerUi from 'swagger-ui-express';
 import logger from '../logger';
-import { NotificationProducer } from '../kafka';
 import { swaggerSpec } from '../config/swagger';
 import { requestLoggingMiddleware } from './middleware';
 import healthRoutes from './routes/health';
@@ -11,12 +10,10 @@ import createBatchRouter from './routes/batch';
 
 export class NotificationAPI {
   private app: Express;
-  private producer: NotificationProducer;
   private port: number;
 
-  constructor(producer: NotificationProducer, port: number = 3000) {
+  constructor(port: number = 3000) {
     this.app = express();
-    this.producer = producer;
     this.port = port;
     this.setupMiddleware();
     this.setupSwagger();
@@ -53,9 +50,9 @@ export class NotificationAPI {
     this.app.use(healthRoutes);
     this.app.use(infoRoutes);
 
-    // Notification routes
-    this.app.use(createNotificationsRouter(this.producer));
-    this.app.use(createBatchRouter(this.producer));
+    // Notification routes (without producer)
+    this.app.use(createNotificationsRouter());
+    this.app.use(createBatchRouter());
   }
 
   start(): void {

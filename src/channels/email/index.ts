@@ -1,2 +1,3 @@
-export { sendEmail } from './email-smtp';
+export { sendEmail } from './orchestrator';
+export * from './providers';
 

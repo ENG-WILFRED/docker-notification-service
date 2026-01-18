@@ -1,15 +1,20 @@
-version: '3.8'
-
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+      LOG4J_ROOT_LOGLEVEL: WARN
+      KAFKA_HEAP_OPTS: "-Xms128M -Xmx128M"
     ports:
       - "2181:2181"
     networks:
       - kafka-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -27,10 +32,49 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka:29092
       KAFKA_CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
-      KAFKA_CONFLUENT_METRICS_ENABLE: 'true'
+      KAFKA_CONFLUENT_METRICS_ENABLE: 'false'
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      LOG4J_ROOT_LOGLEVEL: WARN
+      KAFKA_HEAP_OPTS: "-Xms256M -Xmx256M"
     networks:
       - kafka-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: notification_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - kafka-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - kafka-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   notification-service:
     build:
@@ -38,16 +82,83 @@ services:
       dockerfile: Dockerfile
     depends_on:
       - kafka
+      - postgres
+      - redis
     ports:
       - "47829:47829"
     environment:
+      # Core Configuration
       KAFKA_BROKER: kafka:29092
       SERVICE_PORT: 47829
+      LOG_LEVEL: info
+      NOTIFICATION_TOPIC: notifications
+      
+      # Database Configuration
+      DATABASE_URL: file:../prisma/dev.db
+      
+      # Redis Configuration
+      REDIS_URL: redis://redis:6379/0
+      
+      # Email Provider Configuration
+      EMAIL_PROVIDER: gmail
+      EMAIL_FALLBACK_PROVIDERS: sendgrid,mailgun,ses,postmark
+      
+      # Gmail Configuration
+      GMAIL_FROM: ${GMAIL_FROM}
+      GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD}
+      
+      # SendGrid Configuration
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+      SENDGRID_FROM: ${SENDGRID_FROM}
+      
+      # Mailgun Configuration
+      MAILGUN_API_KEY: ${MAILGUN_API_KEY}
+      MAILGUN_DOMAIN: ${MAILGUN_DOMAIN}
+      MAILGUN_FROM: ${MAILGUN_FROM}
+      
+      # AWS Configuration (shared across SES and SNS)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: us-east-1
+      
+      # AWS SES Configuration
+      SES_FROM: ${SES_FROM}
+      
+      # Postmark Configuration
+      POSTMARK_SERVER_TOKEN: ${POSTMARK_SERVER_TOKEN}
+      POSTMARK_FROM: ${POSTMARK_FROM}
+      
+      # SMS Provider Configuration
+      SMS_PROVIDER: twilio
+      SMS_FALLBACK_PROVIDERS: sns,nexmo,africastalking,clickatell
+      
+      # Twilio Configuration
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER}
+      
+      # Nexmo Configuration
+      NEXMO_API_KEY: ${NEXMO_API_KEY}
+      NEXMO_API_SECRET: ${NEXMO_API_SECRET}
+      NEXMO_FROM: ${NEXMO_FROM}
+      
+      # Africa's Talking Configuration
+      AFRICASTALKING_API_KEY: ${AFRICASTALKING_API_KEY}
+      AFRICASTALKING_USERNAME: ${AFRICASTALKING_USERNAME}
+      
+      # Clickatell Configuration
+      CLICKATELL_API_KEY: ${CLICKATELL_API_KEY}
     networks:
       - kafka-network
     volumes:
       - ./src:/app/src
+    env_file:
+      - .env
 
 networks:
   kafka-network:
     driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
